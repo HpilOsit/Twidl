@@ -8,6 +8,7 @@ from tempfile import TemporaryFile
 from typing import List, Optional
 from urllib.parse import urlsplit
 
+import re
 import requests
 
 try:
@@ -80,16 +81,29 @@ def scrape_tweet_details(tweet_id: int) -> dict:
     }
 
 
+def escape_markdown_v2(text: str) -> str:
+    """Escapes Markdown V2 special characters in a text."""
+    characters_to_escape = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(['\\' + char if char in characters_to_escape else char for char in text])
+
+
+def remove_tco_links(text: str) -> str:
+    """Removes t.co links from a given text."""   
+    pattern = r"https?://t.co/[a-zA-Z0-9]+"
+    return re.sub(pattern, '', text).strip()
+
+
 def generate_markdown_caption(tweet_details: dict) -> str:
     """Generate caption based on tweet details."""
-    text = tweet_details.get('text', 'NO TEXT').replace('-', '\-').replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('!', '\!').replace('+', '\+').replace('#', '\#').replace('@', '\@').replace(':', '\:').replace('~', '\~')
-    user_name = tweet_details.get('user_name', 'NONE')
+    text = remove_tco_links(tweet_details.get('text', 'NO TEXT'))
+    text = escape_markdown_v2(text)
+    user_name = escape_markdown_v2(tweet_details.get('user_name', 'NONE'))
+    user_screen_name = escape_markdown_v2(tweet_details.get('user_screen_name', 'NONE'))
     tweetURL = tweet_details.get('tweetURL', 'NONE')
-    user_screen_name = tweet_details.get('user_screen_name', 'NONE ')
     formatted_link = f"[{text}]({tweetURL})"
-    profile_url = f"https://x.com/{user_screen_name}"
-    formatted_user_link = f"[{user_name}](https://x.com/{user_screen_name})"
-    caption = f'*{formatted_link}*\n\n`Author:`{formatted_user_link}'
+    profile_url = f"https://twitter.com/{user_screen_name}"
+    formatted_user_link = f"[{user_name}]({profile_url})"
+    caption = f"`❀Title : ` *{formatted_link}*\n\n`❀Artist : ` *{formatted_user_link}*"
     return caption
 
 
@@ -98,7 +112,7 @@ def generate_plain_caption(tweet_details: dict) -> str:
     text = tweet_details.get('text', 'NO TEXT')
     user_name = tweet_details.get('user_name', 'NONE')
     tweetURL = tweet_details.get('tweetURL', 'NONE')
-    caption = f"{text}\nLink: {tweetURL}\n\nAuthor: {user_name}"
+    caption = f"作者： {user_name}\n\n{text}\n\n來源： {tweetURL}"
     return caption
 
 
@@ -108,14 +122,11 @@ def reply_photos(update: Update, context: CallbackContext, twitter_photos: List[
     doc_group = []
     tweet_details = scrape_tweet_details(tweet_id)    
     if len(twitter_photos) == 1:
-        # Use Markdown caption if there's only one media item
         caption = generate_markdown_caption(tweet_details)
     else:
-        # Use plain text caption for multiple media items
         caption = generate_plain_caption(tweet_details)
     for photo in twitter_photos:
         photo_url = photo['url']      
-        #log_handling(update, 'info', f'Photo[{len(photo_group)}] url: {photo_url}')
         parsed_url = urlsplit(photo_url)
         # Try changing requested quality to 'orig'
         try:
@@ -163,7 +174,6 @@ def reply_gifs(update: Update, context: CallbackContext, twitter_gifs: List[dict
         gif_url = gif['url']
         log_handling(update, 'info', f'Gif url: {gif_url}')
         context.bot.send_animation(chat_id=DEVELOPER_ID, animation=gif_url, caption=caption, parse_mode=telegram.ParseMode.MARKDOWN_V2)
-        #update.effective_message.reply_animation(animation=gif_url, quote=True)
         log_handling(update, 'info', 'Sent gif')
         context.bot_data['stats']['media_downloaded'] += 1
 
@@ -180,7 +190,6 @@ def reply_videos(update: Update, context: CallbackContext, twitter_videos: List[
             if (video_size := int(request.headers['Content-Length'])) <= constants.MAX_FILESIZE_DOWNLOAD:
                 # Try sending by url
                 context.bot.send_video(chat_id=DEVELOPER_ID, video=video_url, caption=caption, parse_mode=telegram.ParseMode.MARKDOWN_V2, supports_streaming=True)
-                #update.effective_message.reply_video(video=video_url, quote=True)
                 log_handling(update, 'info', 'Sent video (download)')
             elif video_size <= constants.MAX_FILESIZE_UPLOAD:
                 log_handling(update, 'info', f'Video size ({video_size}) is bigger than '
@@ -197,7 +206,6 @@ def reply_videos(update: Update, context: CallbackContext, twitter_videos: List[
                     log_handling(update, 'info', 'Video downloaded, uploading to Telegram')
                     tf.seek(0)
                     context.bot.send_video(chat_id=DEVELOPER_ID, video=tf, caption=caption, parse_mode=telegram.ParseMode.MARKDOWN_V2, supports_streaming=True)
-                    #update.effective_message.reply_video(video=tf, quote=True, supports_streaming=True)
                     log_handling(update, 'info', 'Sent video (upload)')
                 message.delete()
             else:
