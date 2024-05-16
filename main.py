@@ -15,7 +15,7 @@ try:
 except ImportError:
     import re
 import telegram.error
-from telegram import Update, InputMediaAnimation,InputMediaPhoto,InputMediaDocument, constants, BotCommand, BotCommandScopeChat
+from telegram import Update, InputMediaAnimation,InputMediaPhoto,InputMediaDocument, constants, BotCommand, BotCommandScopeChat, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, PicklePersistence
 
 from config import BOT_TOKEN, DEVELOPER_ID, IS_BOT_PRIVATE
@@ -82,7 +82,7 @@ def scrape_tweet_details(tweet_id: int) -> dict:
 
 def generate_markdown_caption(tweet_details: dict) -> str:
     """Generate caption based on tweet details."""
-    text = tweet_details.get('text', 'NO TEXT').replace('-', '\-').replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('!', '\!').replace('+', '\+')
+    text = tweet_details.get('text', 'NO TEXT').replace('-', '\-').replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('!', '\!').replace('+', '\+').replace('#', '\#').replace('@', '\@').replace(':', '\:').replace('~', '\~')
     user_name = tweet_details.get('user_name', 'NONE')
     tweetURL = tweet_details.get('tweetURL', 'NONE')
     user_screen_name = tweet_details.get('user_screen_name', 'NONE ')
@@ -106,8 +106,13 @@ def reply_photos(update: Update, context: CallbackContext, twitter_photos: List[
     """Reply with photo group."""
     photo_group = []
     doc_group = []
-    tweet_details = scrape_tweet_details(tweet_id)
-    caption = generate_plain_caption(tweet_details)
+    tweet_details = scrape_tweet_details(tweet_id)    
+    if len(twitter_photos) == 1:
+        # Use Markdown caption if there's only one media item
+        caption = generate_markdown_caption(tweet_details)
+    else:
+        # Use plain text caption for multiple media items
+        caption = generate_plain_caption(tweet_details)
     for photo in twitter_photos:
         photo_url = photo['url']      
         #log_handling(update, 'info', f'Photo[{len(photo_group)}] url: {photo_url}')
@@ -123,12 +128,28 @@ def reply_photos(update: Update, context: CallbackContext, twitter_photos: List[
             log_handling(update, 'info', 'orig quality not available, using original url')
             doc_group.append(InputMediaDocument(media=photo_url))
             photo_group.append(InputMediaPhoto(media=photo_url))
-    if doc_group:
-        doc_group[-1].caption = caption
-        context.bot.send_media_group(chat_id=DEVELOPER_ID, media=doc_group)
-    if photo_group:
-        photo_group[0].caption = caption
-        context.bot.send_media_group(chat_id=DEVELOPER_ID, media=photo_group)
+    if len(twitter_photos) == 1:        
+        if doc_group:
+            single_document = doc_group[0]
+            single_document.caption = caption
+            single_document.parse_mode = ParseMode.MARKDOWN_V2
+            context.bot.send_document(chat_id=DEVELOPER_ID, document=single_document.media, 
+                caption=single_document.caption, 
+                parse_mode=single_document.parse_mode)
+        if photo_group:
+            single_photo = photo_group[0]
+            single_photo.caption = caption
+            single_photo.parse_mode = ParseMode.MARKDOWN_V2
+            context.bot.send_photo(chat_id=DEVELOPER_ID, photo=single_photo.media, 
+                caption=single_photo.caption,
+                parse_mode=single_photo.parse_mode)
+    else :
+        if doc_group:
+            doc_group[-1].caption = caption
+            context.bot.send_media_group(chat_id=DEVELOPER_ID, media=doc_group)
+        if photo_group:
+            photo_group[0].caption = caption
+            context.bot.send_media_group(chat_id=DEVELOPER_ID, media=photo_group)
     context.bot_data.setdefault('stats', {}).setdefault('media_downloaded', 0)
     context.bot_data['stats']['media_downloaded'] += len(doc_group) + len(photo_group)
     log_handling(update, 'info', 'Finished sending photo groups.')
@@ -257,13 +278,13 @@ def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     update.effective_message.reply_markdown_v2(
         fr'Hi {user.mention_markdown_v2()}\!' +
-        '\n發送推文鏈接，獲取最佳品質媒體'
+        '\n發送推文鏈接可以收到原圖哦'
     )
 
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    update.effective_message.reply_text('發送推文鏈接，獲取最佳品質媒體')
+    update.effective_message.reply_text('發送推文鏈接可以收到原圖哦')
 
 
 def stats_command(update: Update, context: CallbackContext) -> None:
@@ -289,7 +310,7 @@ def deny_access(update: Update, context: CallbackContext) -> None:
     log_handling(update, 'info',
                  f'Access denied to {update.effective_user.full_name} (@{update.effective_user.username}),'
                  f' userId {update.effective_user.id}')
-    update.effective_message.reply_text(f'不可以澀澀喵！')
+    update.effective_message.reply_text(f'沒有權限哦~')
 
 
 def handle_message(update: Update, context: CallbackContext) -> None:
