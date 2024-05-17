@@ -16,6 +16,7 @@ try:
 except ImportError:
     import re
 import telegram.error
+from telegram.error import TimedOut, BadRequest
 from telegram import Update, InputMediaAnimation,InputMediaPhoto,InputMediaDocument, constants, BotCommand, BotCommandScopeChat, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, PicklePersistence
 
@@ -71,9 +72,9 @@ def scrape_tweet_details(tweet_id: int) -> dict:
     r = requests.get(f'https://api.vxtwitter.com/Twitter/status/{tweet_id}')
     r.raise_for_status()
     data = r.json()
-    
+
     return {
-        'text': data.get('text', 'NO TEXT'),
+        'text': data.get('text', 'NO CONTENT'),
         'tweetID': data.get('tweetID', 'NONE '),
         'user_name': data.get('user_name', 'NONE'),
         'tweetURL': data.get('tweetURL', 'NONE'),
@@ -95,7 +96,11 @@ def remove_tco_links(text: str) -> str:
 
 def generate_markdown_caption(tweet_details: dict) -> str:
     """Generate caption based on tweet details."""
-    text = remove_tco_links(tweet_details.get('text', 'NO TEXT'))
+    text = tweet_details.get('text', '')
+    text = remove_tco_links(text)
+    if not text:
+        text = 'NO CONTENT'
+
     text = escape_markdown_v2(text)
     user_name = escape_markdown_v2(tweet_details.get('user_name', 'NONE'))
     user_screen_name = escape_markdown_v2(tweet_details.get('user_screen_name', 'NONE'))
@@ -109,7 +114,10 @@ def generate_markdown_caption(tweet_details: dict) -> str:
 
 def generate_plain_caption(tweet_details: dict) -> str:
     """Generate a plain text caption based on tweet details."""
-    text = tweet_details.get('text', 'NO TEXT')
+    text = tweet_details.get('text', 'NO CONTENT')
+    text = remove_tco_links(text)
+    if not text:
+        text = 'NO CONTENT'
     user_name = tweet_details.get('user_name', 'NONE')
     tweetURL = tweet_details.get('tweetURL', 'NONE')
     caption = f"作者： {user_name}\n\n{text}\n\n來源： {tweetURL}"
@@ -394,10 +402,20 @@ def main() -> None:
         # Set commands menu
         commands = [BotCommand("start", "啓動BOT"), BotCommand("help", "幫助"),
                     BotCommand("stats", "獲取統計訊息"), BotCommand("resetstats", "重置BOT統計訊息")]
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            bot.set_my_commands(commands, scope=BotCommandScopeChat(DEVELOPER_ID))
+            bot.set_my_commands(commands, scope=BotCommandScopeChat(DEVELOPER_ID), timeout=(5 + attempt * 5))
+            break
+        except TimedOut as exc:
+            # 如果是超时错误，我们会在日志中记录，并尝试重新设置命令
+            logger.warning(f"超时错误，尝试次数 {attempt + 1}/{max_retries}: {exc}")
+            if attempt == max_retries - 1:
+                # 如果已经达到最大尝试次数，抛出异常
+                raise    
         except telegram.error.BadRequest as exc:
             logger.warning(f"Couldn't set my commands for developer chat: {exc.message}")
+            break
 
     else:
         # on different commands - answer in Telegram
